@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 chrono = "0.4.40"
 chrono-tz = "0.10.3"
+clap = { version = "4.5.37", features = ["derive"] }
 teloxide = { version = "0.15.0", features = ["tracing"] }
 tokio = { version = "1.44.2", features = ["full"] }
 tracing = "0.1.41"

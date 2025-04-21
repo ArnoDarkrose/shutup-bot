@@ -3,17 +3,29 @@ use std::sync::{Arc, Mutex, atomic::AtomicUsize};
 use chrono::TimeZone;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use chrono_tz::Europe::Moscow;
+use clap::Parser;
 use teloxide::{
     dispatching::dialogue::GetChatId,
     prelude::*,
     types::{MessageKind, User},
 };
 
-const SHUTUP_TARGET: &str = "ArnoDarkrose";
-const MEME_LIMIT: usize = 2;
+#[derive(Parser, Debug)]
+/// Bot that allows to shutup a meme spammer
+struct Cli {
+    #[arg(long)]
+    /// Telegram username of the target person
+    shutup_target: String,
+
+    #[arg(long, default_value = "2")]
+    /// Number of memes per day that the person can send without limitations
+    meme_limit: usize,
+}
 
 #[tokio::main]
 async fn main() {
+    let args = Cli::parse();
+
     let bot = Bot::from_env();
 
     let count_messages = Arc::new(AtomicUsize::new(0));
@@ -28,6 +40,7 @@ async fn main() {
     teloxide::repl(bot, move |bot: Bot, msg: Message| {
         let count_messages = Arc::clone(&count_messages);
         let last_count_refresh = Arc::clone(&last_count_refresh);
+        let shutup_target = args.shutup_target.clone();
 
         async move {
             {
@@ -58,7 +71,7 @@ async fn main() {
                 ..
             } = msg
             {
-                if username == SHUTUP_TARGET {
+                if username == &shutup_target {
                     if let MessageKind::Common(ref common_msg) = msg.kind {
                         if common_msg.forward_origin.is_some() {
                             let count =
@@ -75,8 +88,13 @@ async fn main() {
                             // .await
                             // .unwrap();
 
-                            if count > MEME_LIMIT {
+                            if count > args.meme_limit {
                                 bot.delete_message(msg.chat_id().unwrap(), msg.id)
+                                    .send()
+                                    .await
+                                    .unwrap();
+
+                                bot.send_message(msg.from.unwrap().id, "🤡")
                                     .send()
                                     .await
                                     .unwrap();
