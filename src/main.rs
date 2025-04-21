@@ -78,16 +78,6 @@ async fn main() {
                                 count_messages.load(std::sync::atomic::Ordering::Acquire) + 1;
                             count_messages.store(count, std::sync::atomic::Ordering::Release);
 
-                            // bot.send_message(
-                            //     msg.chat_id().unwrap(),
-                            //     format!(
-                            //         "this user's forwards num: {}",
-                            //         count_messages.load(std::sync::atomic::Ordering::Relaxed)
-                            //     ),
-                            // )
-                            // .await
-                            // .unwrap();
-
                             if count > args.meme_limit {
                                 bot.delete_message(msg.chat_id().unwrap(), msg.id)
                                     .send()
