@@ -10,8 +10,12 @@ use teloxide::{
     types::{MessageKind, User},
 };
 
+use tracing_journald::Layer;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
+
 #[derive(Parser, Debug)]
-/// Bot that allows to shutup a meme spammer
+/// Bot that allows to shutup a meme spammer. Logs are written using journald
 struct Cli {
     #[arg(long)]
     /// Telegram username of the target person
@@ -20,11 +24,32 @@ struct Cli {
     #[arg(long, default_value = "2")]
     /// Number of memes per day that the person can send without limitations
     meme_limit: usize,
+
+    #[arg(long, short, default_value = "info")]
+    /// Level of logs to write, supported values are error, warn, info, debug and tracing
+    log_level: String,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Cli::parse();
+
+    let journald_layer = Layer::new().expect("failed to create journald tracing layer");
+
+    match args.log_level.as_str() {
+        "error" | "warn" | "info" | "debug" | "trace" | "ERROR" | "WARN" | "INFO" | "DEBUG"
+        | "TRACE" => {}
+        _ => {
+            panic!("incorrect log_level value")
+        }
+    }
+
+    let filter = EnvFilter::new(args.log_level);
+
+    tracing_subscriber::registry()
+        .with(journald_layer)
+        .with(filter)
+        .init();
 
     let bot = Bot::from_env();
 
@@ -78,16 +103,22 @@ async fn main() {
                                 count_messages.load(std::sync::atomic::Ordering::Acquire) + 1;
                             count_messages.store(count, std::sync::atomic::Ordering::Release);
 
-                            if count > args.meme_limit {
-                                bot.delete_message(msg.chat_id().unwrap(), msg.id)
-                                    .send()
-                                    .await
-                                    .unwrap();
+                            let Some(chat_id) = msg.chat_id() else {
+                                tracing::warn!("unable get chat_id from message");
 
-                                bot.send_message(msg.from.unwrap().id, "🤡")
-                                    .send()
-                                    .await
-                                    .unwrap();
+                                return Ok(());
+                            };
+
+                            if count > args.meme_limit {
+                                if let Err(e) = bot.delete_message(chat_id, msg.id).send().await {
+                                    tracing::warn!(?e, "unable to delete message: ");
+                                }
+
+                                if let Err(e) =
+                                    bot.send_message(msg.from.unwrap().id, "🤡").send().await
+                                {
+                                    tracing::warn!(?e, "unable to send message: ");
+                                }
                             }
                         }
                     }

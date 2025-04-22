@@ -1,6 +1,6 @@
 [package]
 name = "shutup-bot"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 [dependencies]
@@ -10,3 +10,5 @@ clap = { version = "4.5.37", features = ["derive"] }
 teloxide = { version = "0.15.0", features = ["tracing"] }
 tokio = { version = "1.44.2", features = ["full"] }
 tracing = "0.1.41"
+tracing-journald = "0.3.1"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
