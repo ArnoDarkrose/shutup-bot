@@ -1,13 +1,15 @@
 [package]
 name = "shutup-bot"
-version = "0.1.1"
+version = "2.0.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.98"
 chrono = "0.4.40"
 chrono-tz = "0.10.3"
 clap = { version = "4.5.37", features = ["derive"] }
-teloxide = { version = "0.15.0", features = ["tracing"] }
+dptree = "0.3.0"
+teloxide = { version = "0.15.0", features = ["macros", "tracing"] }
 tokio = { version = "1.44.2", features = ["full"] }
 tracing = "0.1.41"
 tracing-journald = "0.3.1"
