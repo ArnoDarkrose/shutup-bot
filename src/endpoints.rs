@@ -9,12 +9,14 @@ use teloxide::{
 
 use super::*;
 
+type EndpointResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+
 pub async fn handle_spam(
     bot: Bot,
     msg: Message,
     count_messages: Arc<AtomicUsize>,
-    meme_limit: usize,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+    config: Arc<Mutex<Config>>,
+) -> EndpointResult<()> {
     if let Message {
         from: Some(User {
             username: Some(ref username),
@@ -39,7 +41,7 @@ pub async fn handle_spam(
                         return Ok(());
                     };
 
-                    if count > meme_limit {
+                    if count > config.lock().unwrap().meme_limit {
                         if let Err(e) = bot.delete_message(chat_id, msg.id).send().await {
                             tracing::warn!(?e, "unable to delete message: ");
                         }
@@ -66,7 +68,7 @@ pub async fn handle_spam(
     Ok(())
 }
 
-pub async fn help_common(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn help_shutup_target(bot: Bot, msg: Message) -> EndpointResult<()> {
     if let Some(User {
         username: Some(ref username),
         ..
@@ -95,7 +97,7 @@ pub async fn help_common(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + S
     Ok(())
 }
 
-pub async fn help_admin(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn help_admin(bot: Bot, msg: Message) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("failed to get chat_id");
 
@@ -112,14 +114,11 @@ pub async fn help_admin(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Se
     Ok(())
 }
 
-pub async fn add_admin(
-    command: Command,
-    admins: Arc<Mutex<Vec<String>>>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn add_admin(command: Command, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
     match command {
         Command::AddAdmin(admin) => {
-            let mut admins = admins.lock().unwrap();
-            admins.push(admin);
+            let mut config = config.lock().unwrap();
+            config.admins.insert(admin);
         }
         _ => {
             unreachable!()
@@ -132,7 +131,7 @@ pub async fn add_admin(
 pub async fn set_meme_counter(
     command: Command,
     message_count: Arc<AtomicUsize>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> EndpointResult<()> {
     match command {
         Command::SetMemeCounter(new_counter) => {
             message_count.store(new_counter, std::sync::atomic::Ordering::Relaxed);
@@ -149,7 +148,7 @@ pub async fn get_meme_counter(
     bot: Bot,
     msg: Message,
     message_count: Arc<AtomicUsize>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("failed to get chat_id");
 
@@ -175,11 +174,7 @@ pub async fn get_meme_counter(
     Ok(())
 }
 
-pub async fn get_admins(
-    bot: Bot,
-    msg: Message,
-    admins: Arc<Mutex<Vec<String>>>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn get_admins(bot: Bot, msg: Message, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("failed to get chat_id");
 
@@ -187,7 +182,64 @@ pub async fn get_admins(
     };
 
     if let Err(e) = tokio::spawn(
-        bot.send_message(chat_id, format!("{:?}", admins.lock().unwrap()))
+        bot.send_message(chat_id, format!("{:?}", config.lock().unwrap().admins))
+            .send(),
+    )
+    .await
+    .expect("failed to await on tokio task")
+    {
+        tracing::warn!(?e, "failed to send message: ");
+    }
+
+    Ok(())
+}
+
+pub async fn remove_admin(command: Command, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
+    match command {
+        Command::RemoveAdmin(admin) => {
+            let mut config = config.lock().unwrap();
+
+            if &admin
+                != INITIAL_ADMIN
+                    .get()
+                    .expect("this once_lock is only written to once at the beginning of main")
+            {
+                config.admins.remove(&admin);
+            }
+        }
+        _ => {
+            unreachable!()
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn set_meme_limit(command: Command, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
+    match command {
+        Command::SetMemeLimit(new_limit) => {
+            config.lock().unwrap().meme_limit = new_limit;
+        }
+        _ => {
+            unreachable!()
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn get_meme_limit(
+    bot: Bot,
+    msg: Message,
+    config: Arc<Mutex<Config>>,
+) -> EndpointResult<()> {
+    let Some(chat_id) = msg.chat_id() else {
+        tracing::warn!("could not get chat_id");
+        return Ok(());
+    };
+
+    if let Err(e) = tokio::spawn(
+        bot.send_message(chat_id, format!("{}", config.lock().unwrap().meme_limit))
             .send(),
     )
     .await
