@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::sync::{Arc, Mutex, atomic::AtomicUsize};
 
+use teloxide::types::MessageId;
 use teloxide::{
     dispatching::dialogue::GetChatId,
     prelude::*,
@@ -42,9 +43,14 @@ pub async fn handle_spam(
                     };
 
                     if count > config.lock().unwrap().meme_limit {
+                        forward_to_subscribers(bot.clone(), msg.id, chat_id, Arc::clone(&config))
+                            .await;
+
                         if let Err(e) = bot.delete_message(chat_id, msg.id).send().await {
                             tracing::warn!(?e, "unable to delete message: ");
                         }
+
+                        count_messages.store(count - 1, std::sync::atomic::Ordering::Release);
 
                         if let Err(e) = bot
                             .send_message(
@@ -63,6 +69,46 @@ pub async fn handle_spam(
                 }
             }
         }
+    }
+
+    Ok(())
+}
+
+pub async fn forward_to_subscribers(
+    bot: Bot,
+    msg_id: MessageId,
+    src: ChatId,
+    config: Arc<Mutex<Config>>,
+) {
+    let subscribers = config.lock().unwrap().forward_subscribers.clone();
+
+    for subscriber in subscribers {
+        if let Err(e) = bot.forward_message(subscriber, src, msg_id).send().await {
+            tracing::warn!(?e, "failed to forward_message: ");
+        }
+    }
+}
+
+pub async fn get_forward_subscribers(
+    bot: Bot,
+    msg: Message,
+    config: Arc<Mutex<Config>>,
+) -> EndpointResult<()> {
+    let Some(chat_id) = msg.chat_id() else {
+        tracing::warn!("failed to get chat_id");
+
+        return Ok(());
+    };
+
+    if let Err(e) = bot
+        .send_message(
+            chat_id,
+            format!("{:?}", config.lock().unwrap().forward_subscribers),
+        )
+        .send()
+        .await
+    {
+        tracing::warn!(?e, "failed to send message: ");
     }
 
     Ok(())
@@ -247,6 +293,19 @@ pub async fn get_meme_limit(
     {
         tracing::warn!(?e, "failed to send message: ");
     }
+
+    Ok(())
+}
+
+pub async fn subscribe_forwards(msg: Message, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
+    let Some(User { id: user_id, .. }) = msg.from else {
+        tracing::warn!("could not get user_id");
+        return Ok(());
+    };
+
+    let mut config = config.lock().unwrap();
+
+    config.forward_subscribers.push(user_id);
 
     Ok(())
 }

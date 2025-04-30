@@ -1,3 +1,7 @@
+// TODO: save config on disk and load config from disk on launch
+// TODO: send deleted messages to the initial admin(or all subscribed admins)
+// TODO: maybe use RwLock instead of Mutex on config
+
 use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, atomic::AtomicUsize};
@@ -46,6 +50,7 @@ struct Cli {
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "snake_case")]
+#[non_exhaustive]
 pub enum Command {
     Help,
     AddAdmin(String),
@@ -54,6 +59,8 @@ pub enum Command {
     SetMemeLimit(usize),
     MemeLimit,
     MemeCounter,
+    SubscribeForwards,
+    ForwardSubscribers,
     Admins,
 }
 
@@ -61,6 +68,7 @@ pub enum Command {
 pub struct Config {
     pub admins: HashSet<String>,
     pub meme_limit: usize,
+    pub forward_subscribers: Vec<UserId>
 }
 
 fn refresh_meme_counter(counter: Arc<AtomicUsize>, last_count_refresh: Arc<Mutex<DateTime<Tz>>>) {
@@ -113,6 +121,8 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
             .branch(case![Command::Admins].endpoint(get_admins))
             .branch(case![Command::MemeCounter].endpoint(get_meme_counter))
             .branch(case![Command::RemoveAdmin(admin)].endpoint(remove_admin))
+            .branch(case![Command::SubscribeForwards].endpoint(subscribe_forwards))
+            .branch(case![Command::ForwardSubscribers].endpoint(get_forward_subscribers))
             .branch(handle_shutup_target_admin)
             .branch(case![Command::Help].endpoint(help_admin))
             .branch(case![Command::SetMemeCounter(counter)].endpoint(set_meme_counter))
@@ -168,7 +178,8 @@ async fn main() {
             res.insert(args.initial_admin);
             res
         },
-        meme_limit: args.meme_limit
+        meme_limit: args.meme_limit,
+        forward_subscribers: Vec::new()
     }));
 
     Dispatcher::builder(bot, schema())
