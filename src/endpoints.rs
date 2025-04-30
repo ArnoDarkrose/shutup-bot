@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::sync::{Arc, Mutex, atomic::AtomicUsize};
+use std::sync::{Arc, RwLock, atomic::AtomicUsize};
 
 use teloxide::types::MessageId;
 use teloxide::{
@@ -16,7 +16,7 @@ pub async fn handle_spam(
     bot: Bot,
     msg: Message,
     count_messages: Arc<AtomicUsize>,
-    config: Arc<Mutex<Config>>,
+    config: Arc<RwLock<Config>>,
 ) -> EndpointResult<()> {
     if let Message {
         from: Some(User {
@@ -42,7 +42,7 @@ pub async fn handle_spam(
                         return Ok(());
                     };
 
-                    if count > config.lock().unwrap().meme_limit {
+                    if count > config.read().unwrap().meme_limit {
                         forward_to_subscribers(bot.clone(), msg.id, chat_id, Arc::clone(&config))
                             .await;
 
@@ -78,9 +78,9 @@ pub async fn forward_to_subscribers(
     bot: Bot,
     msg_id: MessageId,
     src: ChatId,
-    config: Arc<Mutex<Config>>,
+    config: Arc<RwLock<Config>>,
 ) {
-    let subscribers = config.lock().unwrap().forward_subscribers.clone();
+    let subscribers = config.read().unwrap().forward_subscribers.clone();
 
     for subscriber in subscribers {
         if let Err(e) = bot.forward_message(subscriber, src, msg_id).send().await {
@@ -92,7 +92,7 @@ pub async fn forward_to_subscribers(
 pub async fn get_forward_subscribers(
     bot: Bot,
     msg: Message,
-    config: Arc<Mutex<Config>>,
+    config: Arc<RwLock<Config>>,
 ) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("failed to get chat_id");
@@ -103,7 +103,7 @@ pub async fn get_forward_subscribers(
     if let Err(e) = bot
         .send_message(
             chat_id,
-            format!("{:?}", config.lock().unwrap().forward_subscribers),
+            format!("{:?}", config.read().unwrap().forward_subscribers),
         )
         .send()
         .await
@@ -160,10 +160,10 @@ pub async fn help_admin(bot: Bot, msg: Message) -> EndpointResult<()> {
     Ok(())
 }
 
-pub async fn add_admin(command: Command, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
+pub async fn add_admin(command: Command, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
     match command {
         Command::AddAdmin(admin) => {
-            let mut config = config.lock().unwrap();
+            let mut config = config.write().unwrap();
             config.admins.insert(admin);
         }
         _ => {
@@ -172,7 +172,7 @@ pub async fn add_admin(command: Command, config: Arc<Mutex<Config>>) -> Endpoint
     }
 
     // We don't really need the result of this, so the handle is dropped
-    let _ = tokio::spawn(save_config(Arc::clone(&config)));
+    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }
@@ -223,7 +223,7 @@ pub async fn get_meme_counter(
     Ok(())
 }
 
-pub async fn get_admins(bot: Bot, msg: Message, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
+pub async fn get_admins(bot: Bot, msg: Message, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("failed to get chat_id");
 
@@ -231,7 +231,7 @@ pub async fn get_admins(bot: Bot, msg: Message, config: Arc<Mutex<Config>>) -> E
     };
 
     if let Err(e) = tokio::spawn(
-        bot.send_message(chat_id, format!("{:?}", config.lock().unwrap().admins))
+        bot.send_message(chat_id, format!("{:?}", config.read().unwrap().admins))
             .send(),
     )
     .await
@@ -243,10 +243,10 @@ pub async fn get_admins(bot: Bot, msg: Message, config: Arc<Mutex<Config>>) -> E
     Ok(())
 }
 
-pub async fn remove_admin(command: Command, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
+pub async fn remove_admin(command: Command, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
     match command {
         Command::RemoveAdmin(admin) => {
-            let mut config = config.lock().unwrap();
+            let mut config = config.write().unwrap();
 
             if &admin
                 != INITIAL_ADMIN
@@ -262,20 +262,23 @@ pub async fn remove_admin(command: Command, config: Arc<Mutex<Config>>) -> Endpo
     }
 
     // We don't really need the result of this, so the handle is dropped
-    let _ = tokio::spawn(save_config(Arc::clone(&config)));
+    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }
 
-pub async fn set_meme_limit(command: Command, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
+pub async fn set_meme_limit(command: Command, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
     match command {
         Command::SetMemeLimit(new_limit) => {
-            config.lock().unwrap().meme_limit = new_limit;
+            config.write().unwrap().meme_limit = new_limit;
         }
         _ => {
             unreachable!()
         }
     }
+
+    // We don't really need the result of this, so the handle is dropped
+    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }
@@ -283,7 +286,7 @@ pub async fn set_meme_limit(command: Command, config: Arc<Mutex<Config>>) -> End
 pub async fn get_meme_limit(
     bot: Bot,
     msg: Message,
-    config: Arc<Mutex<Config>>,
+    config: Arc<RwLock<Config>>,
 ) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("could not get chat_id");
@@ -291,7 +294,7 @@ pub async fn get_meme_limit(
     };
 
     if let Err(e) = tokio::spawn(
-        bot.send_message(chat_id, format!("{}", config.lock().unwrap().meme_limit))
+        bot.send_message(chat_id, format!("{}", config.read().unwrap().meme_limit))
             .send(),
     )
     .await
@@ -301,37 +304,37 @@ pub async fn get_meme_limit(
     }
 
     // We don't really need the result of this, so the handle is dropped
-    let _ = tokio::spawn(save_config(Arc::clone(&config)));
+    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }
 
-pub async fn subscribe_forwards(msg: Message, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
+pub async fn subscribe_forwards(msg: Message, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
     let Some(User { id: user_id, .. }) = msg.from else {
         tracing::warn!("could not get user_id");
         return Ok(());
     };
 
     {
-        let mut config = config.lock().unwrap();
+        let mut config = config.write().unwrap();
 
         config.forward_subscribers.push(user_id);
     }
 
     // We don't really need the result of this, so the handle is dropped
-    let _ = tokio::spawn(save_config(Arc::clone(&config)));
+    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }
 
-pub async fn get_config(bot: Bot, msg: Message, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
+pub async fn get_config(bot: Bot, msg: Message, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("could not get chat_id");
         return Ok(());
     };
 
     if let Err(e) = bot
-        .send_message(chat_id, format!("{:?}", config.lock().unwrap()))
+        .send_message(chat_id, format!("{:?}", config.read().unwrap()))
         .send()
         .await
     {

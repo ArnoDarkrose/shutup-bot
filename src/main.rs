@@ -1,9 +1,7 @@
-// TODO: maybe use RwLock instead of Mutex on config
-
 use std::collections::HashSet;
 use std::io::Read;
 use std::sync::OnceLock;
-use std::sync::{Arc, Mutex, atomic::AtomicUsize};
+use std::sync::{Arc, Mutex, atomic::AtomicUsize, RwLock};
 
 use chrono::{DateTime, TimeZone};
 use chrono_tz::Tz;
@@ -129,9 +127,9 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
 
     let handle_commands = teloxide::filter_command::<Command, _>()
         .branch(
-            dptree::filter(|msg: Message, config: Arc<Mutex<Config>>| {
+            dptree::filter(|msg: Message, config: Arc<RwLock<Config>>| {
                 if let Some(User{username: Some(ref username), ..}) = msg.from {
-                    let admins = &config.lock().unwrap().admins;
+                    let admins = &config.read().unwrap().admins;
                     admins.contains(username)
                 } else  {
                     false
@@ -160,8 +158,8 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
         .endpoint(handle_spam)
 }
 
-async fn save_config(config: Arc<Mutex<Config>>) -> tokio::io::Result<()>{
-    let contents = serde_json::to_string(&*config.lock().unwrap())?;
+async fn save_config(config: Arc<RwLock<Config>>) -> tokio::io::Result<()>{
+    let contents = serde_json::to_string(&*config.read().unwrap())?;
 
     let mut path = expanduser::expanduser("~/.config")?;
 
@@ -223,7 +221,7 @@ async fn main() {
     let last_count_refresh = Moscow.from_local_datetime(&naive).unwrap();
     let last_count_refresh = Arc::new(Mutex::new(last_count_refresh));
 
-    let config = Arc::new(Mutex::new(load_config().unwrap_or(Config {
+    let config = Arc::new(RwLock::new(load_config().unwrap_or(Config {
         meme_limit: args.meme_limit,
         ..Default::default()
     })));
