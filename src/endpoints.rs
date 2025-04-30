@@ -171,6 +171,9 @@ pub async fn add_admin(command: Command, config: Arc<Mutex<Config>>) -> Endpoint
         }
     }
 
+    // We don't really need the result of this, so the handle is dropped
+    let _ = tokio::spawn(save_config(Arc::clone(&config)));
+
     Ok(())
 }
 
@@ -258,6 +261,9 @@ pub async fn remove_admin(command: Command, config: Arc<Mutex<Config>>) -> Endpo
         }
     }
 
+    // We don't really need the result of this, so the handle is dropped
+    let _ = tokio::spawn(save_config(Arc::clone(&config)));
+
     Ok(())
 }
 
@@ -294,6 +300,9 @@ pub async fn get_meme_limit(
         tracing::warn!(?e, "failed to send message: ");
     }
 
+    // We don't really need the result of this, so the handle is dropped
+    let _ = tokio::spawn(save_config(Arc::clone(&config)));
+
     Ok(())
 }
 
@@ -303,9 +312,31 @@ pub async fn subscribe_forwards(msg: Message, config: Arc<Mutex<Config>>) -> End
         return Ok(());
     };
 
-    let mut config = config.lock().unwrap();
+    {
+        let mut config = config.lock().unwrap();
 
-    config.forward_subscribers.push(user_id);
+        config.forward_subscribers.push(user_id);
+    }
+
+    // We don't really need the result of this, so the handle is dropped
+    let _ = tokio::spawn(save_config(Arc::clone(&config)));
+
+    Ok(())
+}
+
+pub async fn get_config(bot: Bot, msg: Message, config: Arc<Mutex<Config>>) -> EndpointResult<()> {
+    let Some(chat_id) = msg.chat_id() else {
+        tracing::warn!("could not get chat_id");
+        return Ok(());
+    };
+
+    if let Err(e) = bot
+        .send_message(chat_id, format!("{:?}", config.lock().unwrap()))
+        .send()
+        .await
+    {
+        tracing::warn!(?e, "failed to send message: ");
+    }
 
     Ok(())
 }

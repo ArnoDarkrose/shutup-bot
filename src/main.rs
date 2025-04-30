@@ -1,8 +1,7 @@
-// TODO: save config on disk and load config from disk on launch
-// TODO: send deleted messages to the initial admin(or all subscribed admins)
 // TODO: maybe use RwLock instead of Mutex on config
 
 use std::collections::HashSet;
+use std::io::Read;
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, atomic::AtomicUsize};
 
@@ -16,6 +15,9 @@ use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
 use teloxide::types::User;
 use teloxide::utils::command::BotCommands;
+use serde::{Serialize, Deserialize};
+
+use tokio::io::AsyncWriteExt as _;
 
 use tracing_journald::Layer;
 use tracing_subscriber::EnvFilter;
@@ -62,13 +64,33 @@ pub enum Command {
     SubscribeForwards,
     ForwardSubscribers,
     Admins,
+    Config
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub admins: HashSet<String>,
     pub meme_limit: usize,
     pub forward_subscribers: Vec<UserId>
+}
+
+impl Default for Config {
+    fn default() -> Self {
+         Config {
+            admins : {
+                let mut res = HashSet::new();
+                res.insert(
+                    INITIAL_ADMIN
+                        .get()
+                        .expect("this is static is only being written to once in the beginning of main")
+                        .to_owned()
+                );
+                res
+            },
+            meme_limit: 3,
+            forward_subscribers: Vec::new()
+        }   
+    }
 }
 
 fn refresh_meme_counter(counter: Arc<AtomicUsize>, last_count_refresh: Arc<Mutex<DateTime<Tz>>>) {
@@ -123,6 +145,7 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
             .branch(case![Command::RemoveAdmin(admin)].endpoint(remove_admin))
             .branch(case![Command::SubscribeForwards].endpoint(subscribe_forwards))
             .branch(case![Command::ForwardSubscribers].endpoint(get_forward_subscribers))
+            .branch(case![Command::Config].endpoint(get_config))
             .branch(handle_shutup_target_admin)
             .branch(case![Command::Help].endpoint(help_admin))
             .branch(case![Command::SetMemeCounter(counter)].endpoint(set_meme_counter))
@@ -135,6 +158,34 @@ fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>>
          })
         .branch(handle_commands)
         .endpoint(handle_spam)
+}
+
+async fn save_config(config: Arc<Mutex<Config>>) -> tokio::io::Result<()>{
+    let contents = serde_json::to_string(&*config.lock().unwrap())?;
+
+    let mut path = expanduser::expanduser("~/.config")?;
+
+    tokio::fs::create_dir_all(&path).await?;
+        
+    path.push("shutup-bot.json");
+
+    let mut fd = tokio::fs::File::create(path).await?;
+
+    fd.write_all(contents.as_bytes()).await?;
+
+    
+    Ok(())
+}
+
+fn load_config() -> std::io::Result<Config> {
+    let path = expanduser::expanduser("~/.config/shutup-bot.json")?;
+    let fd = std::fs::File::open(path)?;
+    let mut fd = std::io::BufReader::new(fd);
+
+    let mut buf = String::new();
+    fd.read_to_string(&mut buf)?;
+
+    Ok(serde_json::from_str::<Config>(&buf)?)
 }
 
 #[tokio::main]
@@ -172,15 +223,10 @@ async fn main() {
     let last_count_refresh = Moscow.from_local_datetime(&naive).unwrap();
     let last_count_refresh = Arc::new(Mutex::new(last_count_refresh));
 
-    let config = Arc::new(Mutex::new(Config {
-        admins : {
-            let mut res = HashSet::new();
-            res.insert(args.initial_admin);
-            res
-        },
+    let config = Arc::new(Mutex::new(load_config().unwrap_or(Config {
         meme_limit: args.meme_limit,
-        forward_subscribers: Vec::new()
-    }));
+        ..Default::default()
+    })));
 
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![
