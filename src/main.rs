@@ -1,4 +1,3 @@
-// TODO: also save last count refresh on disk
 // TODO: add a filter for references so that bot also deletes references to tg messages, not only forwards
 
 use std::sync::OnceLock;

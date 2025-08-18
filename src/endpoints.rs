@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock, atomic::AtomicUsize};
@@ -10,8 +9,8 @@ use teloxide::{
     types::{MessageKind, User},
 };
 
-use crate::app::{Command, MsgWrapper};
-use crate::opts::{Config, save_config};
+use crate::app::{Command, MsgWrapper, SpamQueue};
+use crate::opts::Config;
 
 use super::*;
 
@@ -22,7 +21,7 @@ pub async fn handle_spam(
     msg: Message,
     count_messages: Arc<AtomicUsize>,
     config: Arc<RwLock<Config>>,
-    spam_queue: Arc<RwLock<VecDeque<MsgWrapper>>>,
+    spam_queue: Arc<RwLock<SpamQueue>>,
 ) -> EndpointResult<()> {
     if let Message {
         from: Some(User {
@@ -31,49 +30,44 @@ pub async fn handle_spam(
         }),
         ..
     } = msg
-    {
-        if username
+        && username
             == SHUTUP_TARGET
                 .get()
                 .expect("this cell is only written to once at the beginning of main")
-        {
-            if let MessageKind::Common(ref common_msg) = msg.kind {
-                if common_msg.forward_origin.is_some() {
-                    let count = count_messages.fetch_add(1, Ordering::AcqRel) + 1;
+        && let MessageKind::Common(ref common_msg) = msg.kind
+        && common_msg.forward_origin.is_some()
+    {
+        let count = count_messages.fetch_add(1, Ordering::AcqRel) + 1;
 
-                    let Some(chat_id) = msg.chat_id() else {
-                        tracing::warn!("failed get chat_id from message");
+        let Some(chat_id) = msg.chat_id() else {
+            tracing::warn!("failed get chat_id from message");
 
-                        return Ok(());
-                    };
+            return Ok(());
+        };
 
-                    let meme_limit = { config.read().unwrap().meme_limit };
+        let meme_limit = { config.read().unwrap().meme_limit };
 
-                    if count > meme_limit {
-                        forward_to_subscribers(bot.clone(), msg.id, chat_id, Arc::clone(&config))
-                            .await;
+        if count > meme_limit {
+            forward_to_subscribers(bot.clone(), msg.id, chat_id, Arc::clone(&config)).await;
 
-                        if let Err(e) = bot.delete_message(chat_id, msg.id).send().await {
-                            tracing::warn!(?e, "failed to delete message");
-                        }
+            if let Err(e) = bot.delete_message(chat_id, msg.id).send().await {
+                tracing::warn!(?e, "failed to delete message");
+            }
 
-                        spam_queue.write().unwrap().push_back(MsgWrapper {
-                            msg_id: msg.id,
-                            chat_id,
-                        });
+            spam_queue.write().unwrap().push_back(MsgWrapper {
+                msg_id: msg.id,
+                chat_id,
+            });
 
-                        if let Err(e) = bot
-                            .send_message(
-                                msg.from.as_ref().expect("unreachable: none username").id,
-                                "🤡",
-                            )
-                            .send()
-                            .await
-                        {
-                            tracing::warn!(?e, "failed to send message");
-                        }
-                    }
-                }
+            if let Err(e) = bot
+                .send_message(
+                    msg.from.as_ref().expect("unreachable: none username").id,
+                    "🤡",
+                )
+                .send()
+                .await
+            {
+                tracing::warn!(?e, "failed to send message");
             }
         }
     }
@@ -126,24 +120,22 @@ pub async fn help_shutup_target(bot: Bot, msg: Message) -> EndpointResult<()> {
         username: Some(ref username),
         ..
     }) = msg.from
-    {
-        if username
+        && username
             == SHUTUP_TARGET
                 .get()
                 .expect("this OnceLock is only written to once at the beginning of main")
+    {
+        let Some(chat_id) = msg.chat_id() else {
+            tracing::warn!("failed to get chat_id");
+
+            return Ok(());
+        };
+
+        if let Err(e) = tokio::spawn(bot.send_message(chat_id, "иди нахуй").send())
+            .await
+            .expect("failed to await on tokio task")
         {
-            let Some(chat_id) = msg.chat_id() else {
-                tracing::warn!("failed to get chat_id");
-
-                return Ok(());
-            };
-
-            if let Err(e) = tokio::spawn(bot.send_message(chat_id, "иди нахуй").send())
-                .await
-                .expect("failed to await on tokio task")
-            {
-                tracing::warn!(?e, "failed to send message: ");
-            }
+            tracing::warn!(?e, "failed to send message: ");
         }
     }
 
@@ -177,9 +169,6 @@ pub async fn add_admin(command: Command, config: Arc<RwLock<Config>>) -> Endpoin
             unreachable!()
         }
     }
-
-    // We don't really need the result of this, so the handle is dropped
-    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }
@@ -268,9 +257,6 @@ pub async fn remove_admin(command: Command, config: Arc<RwLock<Config>>) -> Endp
         }
     }
 
-    // We don't really need the result of this, so the handle is dropped
-    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
-
     Ok(())
 }
 
@@ -283,9 +269,6 @@ pub async fn set_meme_limit(command: Command, config: Arc<RwLock<Config>>) -> En
             unreachable!()
         }
     }
-
-    // We don't really need the result of this, so the handle is dropped
-    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }
@@ -310,9 +293,6 @@ pub async fn get_meme_limit(
         tracing::warn!(?e, "failed to send message: ");
     }
 
-    // We don't really need the result of this, so the handle is dropped
-    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
-
     Ok(())
 }
 
@@ -325,18 +305,10 @@ pub async fn subscribe_forwards(msg: Message, config: Arc<RwLock<Config>>) -> En
     {
         let mut config = config.write().unwrap();
 
-        if config
-            .forward_subscribers
-            .iter()
-            .find(|&&v| v == user_id)
-            .is_none()
-        {
+        if !config.forward_subscribers.iter().any(|&v| v == user_id) {
             config.forward_subscribers.insert(user_id);
         }
     }
-
-    // We don't really need the result of this, so the handle is dropped
-    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }
@@ -352,9 +324,6 @@ pub async fn unsubscribe_forwards(msg: Message, config: Arc<RwLock<Config>>) -> 
 
         config.forward_subscribers.remove(&user_id);
     }
-
-    // We don't really need the result of this, so the handle is dropped
-    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }
@@ -379,7 +348,7 @@ pub async fn get_config(bot: Bot, msg: Message, config: Arc<RwLock<Config>>) -> 
 pub async fn queue_size(
     bot: Bot,
     msg: Message,
-    spam_queue: Arc<RwLock<VecDeque<MsgWrapper>>>,
+    spam_queue: Arc<RwLock<SpamQueue>>,
 ) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("could not get chat_id");
@@ -409,18 +378,10 @@ pub async fn subscribe_queue(msg: Message, config: Arc<RwLock<Config>>) -> Endpo
     {
         let mut config = config.write().unwrap();
 
-        if config
-            .queue_subscribers
-            .iter()
-            .find(|&&v| v == chat_id)
-            .is_none()
-        {
+        if !config.queue_subscribers.iter().any(|&v| v == chat_id) {
             config.queue_subscribers.insert(chat_id);
         }
     }
-
-    // We don't really need the result of this, so the handle is dropped
-    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }
@@ -436,9 +397,6 @@ pub async fn unsubscribe_queue(msg: Message, config: Arc<RwLock<Config>>) -> End
 
         config.queue_subscribers.remove(&chat_id);
     }
-
-    // We don't really need the result of this, so the handle is dropped
-    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }

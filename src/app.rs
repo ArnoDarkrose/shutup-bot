@@ -8,6 +8,7 @@ use std::{
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use chrono_tz::Europe::Moscow;
 use chrono_tz::Tz;
+use serde::{Deserialize, Serialize};
 use teloxide::dispatching::DefaultKey;
 use teloxide::{
     Bot,
@@ -19,7 +20,7 @@ use tokio::select;
 use tower::limit::ConcurrencyLimitLayer;
 use tracing::warn;
 
-use crate::utils::{manage_queue, signal_handler};
+use crate::utils::{daily, load_spam_queue, save_state, signal_handler};
 use crate::{
     opts::{Config, load_config},
     schema::schema,
@@ -48,14 +49,16 @@ pub enum Command {
     UnsubscribeQueue,
 }
 
+pub type SpamQueue = VecDeque<MsgWrapper>;
+
 /// Stores message id and id of the chat it was sent to
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MsgWrapper {
     pub msg_id: MessageId,
     pub chat_id: ChatId,
 }
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord, Default)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct App {
     meme_limit: usize,
     connect_timeout: Duration,
@@ -98,20 +101,19 @@ impl App {
         last_count_refresh: Arc<Mutex<DateTime<Tz>>>,
         count_messages: Arc<AtomicUsize>,
     ) -> Dispatcher<Bot, Box<dyn Error + Send + Sync + 'static>, DefaultKey> {
-        let disp = Dispatcher::builder(bot, schema())
+        Dispatcher::builder(bot, schema())
             .dependencies(dptree::deps![
                 Arc::clone(&last_count_refresh),
                 Arc::clone(&count_messages),
                 Arc::clone(&config),
                 Arc::clone(&spam_queue)
             ])
-            .build();
-        disp
+            .build()
     }
 
     pub async fn start(self) {
         loop {
-            let config = Arc::new(RwLock::new(load_config().unwrap_or(Config {
+            let config = Arc::new(RwLock::new(load_config().await.unwrap_or(Config {
                 meme_limit: self.meme_limit,
                 ..Default::default()
             })));
@@ -126,7 +128,14 @@ impl App {
                 Arc::new(Mutex::new(Moscow.from_local_datetime(&naive).unwrap()));
 
             let bot = self.bot();
-            let spam_queue = Arc::new(RwLock::new(VecDeque::<MsgWrapper>::new()));
+            let spam_queue = match load_spam_queue().await {
+                Ok(queue) => Arc::new(RwLock::new(queue)),
+                Err(e) => {
+                    warn!(?e, "error while reading spam_queue");
+
+                    Arc::new(RwLock::new(VecDeque::<MsgWrapper>::new()))
+                }
+            };
 
             let mut dispatcher = self.dispatcher(
                 bot.clone(),
@@ -138,12 +147,14 @@ impl App {
 
             select! {
                 res = signal_handler() => {
-                    warn!(?res);
+                    warn!(?res, "received sigterm of sigint, exiting...");
+
+                    save_state(spam_queue.clone(), config.clone()).await;
                 }
                 _ = dispatcher.dispatch() => {
                     warn!("dispatcher ended unexpectedly");
                 }
-                _ = manage_queue(bot, count_messages, spam_queue, config) => {
+                _ = daily(bot, count_messages, spam_queue.clone(), config.clone()) => {
                     warn!("manage queue task ended unexpectedly")
                 }
             }

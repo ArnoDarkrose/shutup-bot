@@ -1,13 +1,9 @@
-use std::{
-    collections::HashSet,
-    io::Read,
-    sync::{Arc, RwLock},
-};
+use std::collections::HashSet;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use teloxide::types::{ChatId, UserId};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, BufReader};
 use tracing_journald::Layer;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -95,29 +91,13 @@ impl Default for Config {
     }
 }
 
-pub async fn save_config(config: Arc<RwLock<Config>>) -> tokio::io::Result<()> {
-    let contents = serde_json::to_string(&*config.read().unwrap())?;
-
-    let mut path = expanduser::expanduser("~/.config")?;
-
-    tokio::fs::create_dir_all(&path).await?;
-
-    path.push("shutup-bot.json");
-
-    let mut fd = tokio::fs::File::create(path).await?;
-
-    fd.write_all(contents.as_bytes()).await?;
-
-    Ok(())
-}
-
-pub fn load_config() -> std::io::Result<Config> {
-    let path = expanduser::expanduser("~/.config/shutup-bot.json")?;
-    let fd = std::fs::File::open(path)?;
-    let mut fd = std::io::BufReader::new(fd);
+pub async fn load_config() -> tokio::io::Result<Config> {
+    let path = expanduser::expanduser("~/.config/shutup-bot/config.json")?;
+    let fd = tokio::fs::File::open(path).await?;
+    let mut fd = BufReader::new(fd);
 
     let mut buf = String::new();
-    fd.read_to_string(&mut buf)?;
+    fd.read_to_string(&mut buf).await?;
 
-    Ok(serde_json::from_str::<Config>(&buf)?)
+    Ok(serde_json::from_str(&buf)?)
 }
