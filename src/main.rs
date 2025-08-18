@@ -1,4 +1,6 @@
 // TODO: spawn a task that will wake every 00:00 and referesh counters and send queued messages
+// TODO: add a filter for references so that bot also deletes references to tg messages, not only forwards
+
 use std::sync::OnceLock;
 
 use clap::Parser;
@@ -11,6 +13,7 @@ mod endpoints;
 mod helpers;
 mod opts;
 mod schema;
+mod utils;
 
 static SHUTUP_TARGET: OnceLock<String> = OnceLock::new();
 static INITIAL_ADMIN: OnceLock<String> = OnceLock::new();

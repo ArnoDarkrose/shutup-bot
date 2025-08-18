@@ -9,7 +9,7 @@ use teloxide::types::User;
 
 use crate::app::Command;
 use crate::helpers::refresh_meme_counter;
-use crate::opts::State;
+use crate::opts::Config;
 use crate::{endpoints::*, SHUTUP_TARGET};
 
 pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
@@ -29,7 +29,7 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'stat
 
     let handle_commands = teloxide::filter_command::<Command, _>()
         .branch(
-            dptree::filter(|msg: Message, config: Arc<RwLock<State>>| {
+            dptree::filter(|msg: Message, config: Arc<RwLock<Config>>| {
                 if let Some(User{username: Some(ref username), ..}) = msg.from {
                     let admins = &config.read().unwrap().admins;
                     admins.contains(username)

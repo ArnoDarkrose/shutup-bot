@@ -66,16 +66,16 @@ impl Cli {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct State {
+pub struct Config {
     pub admins: HashSet<String>,
     pub meme_limit: usize,
     pub forward_subscribers: HashSet<UserId>,
     pub queue_subscribers: HashSet<ChatId>,
 }
 
-impl Default for State {
+impl Default for Config {
     fn default() -> Self {
-        State {
+        Config {
             admins: {
                 let mut res = HashSet::new();
                 res.insert(
@@ -95,7 +95,7 @@ impl Default for State {
     }
 }
 
-pub async fn save_config(config: Arc<RwLock<State>>) -> tokio::io::Result<()> {
+pub async fn save_config(config: Arc<RwLock<Config>>) -> tokio::io::Result<()> {
     let contents = serde_json::to_string(&*config.read().unwrap())?;
 
     let mut path = expanduser::expanduser("~/.config")?;
@@ -111,7 +111,7 @@ pub async fn save_config(config: Arc<RwLock<State>>) -> tokio::io::Result<()> {
     Ok(())
 }
 
-pub fn load_config() -> std::io::Result<State> {
+pub fn load_config() -> std::io::Result<Config> {
     let path = expanduser::expanduser("~/.config/shutup-bot.json")?;
     let fd = std::fs::File::open(path)?;
     let mut fd = std::io::BufReader::new(fd);
@@ -119,5 +119,5 @@ pub fn load_config() -> std::io::Result<State> {
     let mut buf = String::new();
     fd.read_to_string(&mut buf)?;
 
-    Ok(serde_json::from_str::<State>(&buf)?)
+    Ok(serde_json::from_str::<Config>(&buf)?)
 }

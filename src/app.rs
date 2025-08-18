@@ -1,3 +1,4 @@
+use std::error::Error;
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex, RwLock, atomic::AtomicUsize},
@@ -6,16 +7,20 @@ use std::{
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use chrono_tz::Europe::Moscow;
+use teloxide::dispatching::DefaultKey;
 use teloxide::{
     Bot,
     macros::BotCommands,
     prelude::Dispatcher,
     types::{ChatId, MessageId},
 };
+use tokio::select;
 use tower::limit::ConcurrencyLimitLayer;
+use tracing::warn;
 
+use crate::utils::signal_handler;
 use crate::{
-    opts::{State, load_config},
+    opts::{Config, load_config},
     schema::schema,
 };
 
@@ -72,7 +77,7 @@ impl App {
         }
     }
 
-    pub async fn start(self) {
+    fn dispatcher(&self) -> Dispatcher<Bot, Box<dyn Error + Send + Sync + 'static>, DefaultKey> {
         let client = reqwest::Client::builder()
             .connect_timeout(self.connect_timeout)
             .timeout(self.timeout)
@@ -89,26 +94,38 @@ impl App {
             NaiveDate::from_ymd_opt(2025, 4, 21).unwrap(),
             NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
         );
-        let last_count_refresh = Moscow.from_local_datetime(&naive).unwrap();
-        let last_count_refresh = Arc::new(Mutex::new(last_count_refresh));
+        let last_count_refresh = Arc::new(Mutex::new(Moscow.from_local_datetime(&naive).unwrap()));
 
-        let state = Arc::new(RwLock::new(load_config().unwrap_or(State {
+        let state = Arc::new(RwLock::new(load_config().unwrap_or(Config {
             meme_limit: self.meme_limit,
             ..Default::default()
         })));
 
         let spam_queue = Arc::new(RwLock::new(VecDeque::<MsgWrapper>::new()));
 
-        Dispatcher::builder(bot, schema())
+        let disp = Dispatcher::builder(bot, schema())
             .dependencies(dptree::deps![
                 Arc::clone(&last_count_refresh),
                 Arc::clone(&count_messages),
                 Arc::clone(&state),
                 Arc::clone(&spam_queue)
             ])
-            .enable_ctrlc_handler()
-            .build()
-            .dispatch()
-            .await;
+            .build();
+        disp
+    }
+
+    pub async fn start(self) {
+        loop {
+            let mut dispatcher = self.dispatcher();
+
+            select! {
+                res = signal_handler() => {
+                    warn!(?res);
+                }
+                _ = dispatcher.dispatch() => {
+                    warn!("dispatcher ended unexpectedly");
+                }
+            }
+        }
     }
 }
