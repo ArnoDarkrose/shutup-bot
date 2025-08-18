@@ -5,8 +5,9 @@ use std::{
     time::Duration,
 };
 
-use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use chrono_tz::Europe::Moscow;
+use chrono_tz::Tz;
 use teloxide::dispatching::DefaultKey;
 use teloxide::{
     Bot,
@@ -18,7 +19,7 @@ use tokio::select;
 use tower::limit::ConcurrencyLimitLayer;
 use tracing::warn;
 
-use crate::utils::signal_handler;
+use crate::utils::{manage_queue, signal_handler};
 use crate::{
     opts::{Config, load_config},
     schema::schema,
@@ -77,7 +78,7 @@ impl App {
         }
     }
 
-    fn dispatcher(&self) -> Dispatcher<Bot, Box<dyn Error + Send + Sync + 'static>, DefaultKey> {
+    fn bot(&self) -> Bot {
         let client = reqwest::Client::builder()
             .connect_timeout(self.connect_timeout)
             .timeout(self.timeout)
@@ -86,28 +87,22 @@ impl App {
             .build()
             .expect("client creation failed");
 
-        let bot = Bot::from_env_with_client(client);
+        Bot::from_env_with_client(client)
+    }
 
-        let count_messages = Arc::new(AtomicUsize::new(0));
-
-        let naive = NaiveDateTime::new(
-            NaiveDate::from_ymd_opt(2025, 4, 21).unwrap(),
-            NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
-        );
-        let last_count_refresh = Arc::new(Mutex::new(Moscow.from_local_datetime(&naive).unwrap()));
-
-        let state = Arc::new(RwLock::new(load_config().unwrap_or(Config {
-            meme_limit: self.meme_limit,
-            ..Default::default()
-        })));
-
-        let spam_queue = Arc::new(RwLock::new(VecDeque::<MsgWrapper>::new()));
-
+    fn dispatcher(
+        &self,
+        bot: Bot,
+        spam_queue: Arc<RwLock<VecDeque<MsgWrapper>>>,
+        config: Arc<RwLock<Config>>,
+        last_count_refresh: Arc<Mutex<DateTime<Tz>>>,
+        count_messages: Arc<AtomicUsize>,
+    ) -> Dispatcher<Bot, Box<dyn Error + Send + Sync + 'static>, DefaultKey> {
         let disp = Dispatcher::builder(bot, schema())
             .dependencies(dptree::deps![
                 Arc::clone(&last_count_refresh),
                 Arc::clone(&count_messages),
-                Arc::clone(&state),
+                Arc::clone(&config),
                 Arc::clone(&spam_queue)
             ])
             .build();
@@ -116,7 +111,30 @@ impl App {
 
     pub async fn start(self) {
         loop {
-            let mut dispatcher = self.dispatcher();
+            let config = Arc::new(RwLock::new(load_config().unwrap_or(Config {
+                meme_limit: self.meme_limit,
+                ..Default::default()
+            })));
+
+            let count_messages = Arc::new(AtomicUsize::new(0));
+
+            let naive = NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2025, 4, 21).unwrap(),
+                NaiveTime::from_hms_opt(0, 0, 0).unwrap(),
+            );
+            let last_count_refresh =
+                Arc::new(Mutex::new(Moscow.from_local_datetime(&naive).unwrap()));
+
+            let bot = self.bot();
+            let spam_queue = Arc::new(RwLock::new(VecDeque::<MsgWrapper>::new()));
+
+            let mut dispatcher = self.dispatcher(
+                bot.clone(),
+                spam_queue.clone(),
+                config.clone(),
+                last_count_refresh,
+                count_messages.clone(),
+            );
 
             select! {
                 res = signal_handler() => {
@@ -124,6 +142,9 @@ impl App {
                 }
                 _ = dispatcher.dispatch() => {
                     warn!("dispatcher ended unexpectedly");
+                }
+                _ = manage_queue(bot, count_messages, spam_queue, config) => {
+                    warn!("manage queue task ended unexpectedly")
                 }
             }
         }

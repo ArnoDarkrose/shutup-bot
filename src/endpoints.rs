@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::error::Error;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock, atomic::AtomicUsize};
 
 use teloxide::types::MessageId;
@@ -38,11 +39,10 @@ pub async fn handle_spam(
         {
             if let MessageKind::Common(ref common_msg) = msg.kind {
                 if common_msg.forward_origin.is_some() {
-                    let count = count_messages.load(std::sync::atomic::Ordering::Acquire) + 1;
-                    count_messages.store(count, std::sync::atomic::Ordering::Release);
+                    let count = count_messages.fetch_add(1, Ordering::AcqRel) + 1;
 
                     let Some(chat_id) = msg.chat_id() else {
-                        tracing::warn!("unable get chat_id from message");
+                        tracing::warn!("failed get chat_id from message");
 
                         return Ok(());
                     };
@@ -54,7 +54,7 @@ pub async fn handle_spam(
                             .await;
 
                         if let Err(e) = bot.delete_message(chat_id, msg.id).send().await {
-                            tracing::warn!(?e, "unable to delete message: ");
+                            tracing::warn!(?e, "failed to delete message");
                         }
 
                         spam_queue.write().unwrap().push_back(MsgWrapper {
@@ -62,20 +62,15 @@ pub async fn handle_spam(
                             chat_id,
                         });
 
-                        count_messages.store(count - 1, std::sync::atomic::Ordering::Release);
-
                         if let Err(e) = bot
                             .send_message(
-                                msg.from
-                                    .as_ref()
-                                    .expect("if let earlier checks that this is some")
-                                    .id,
+                                msg.from.as_ref().expect("unreachable: none username").id,
                                 "🤡",
                             )
                             .send()
                             .await
                         {
-                            tracing::warn!(?e, "unable to send message: ");
+                            tracing::warn!(?e, "failed to send message");
                         }
                     }
                 }

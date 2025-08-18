@@ -1,4 +1,4 @@
-// TODO: spawn a task that will wake every 00:00 and referesh counters and send queued messages
+// TODO: also save last count refresh on disk
 // TODO: add a filter for references so that bot also deletes references to tg messages, not only forwards
 
 use std::sync::OnceLock;
@@ -10,7 +10,6 @@ use crate::app::App;
 
 mod app;
 mod endpoints;
-mod helpers;
 mod opts;
 mod schema;
 mod utils;
