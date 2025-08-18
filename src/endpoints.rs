@@ -8,6 +8,9 @@ use teloxide::{
     types::{MessageKind, User},
 };
 
+use crate::core::Command;
+use crate::opts::{State, save_config};
+
 use super::*;
 
 type EndpointResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
@@ -16,7 +19,7 @@ pub async fn handle_spam(
     bot: Bot,
     msg: Message,
     count_messages: Arc<AtomicUsize>,
-    config: Arc<RwLock<Config>>,
+    config: Arc<RwLock<State>>,
 ) -> EndpointResult<()> {
     if let Message {
         from: Some(User {
@@ -78,7 +81,7 @@ pub async fn forward_to_subscribers(
     bot: Bot,
     msg_id: MessageId,
     src: ChatId,
-    config: Arc<RwLock<Config>>,
+    config: Arc<RwLock<State>>,
 ) {
     let subscribers = config.read().unwrap().forward_subscribers.clone();
 
@@ -92,7 +95,7 @@ pub async fn forward_to_subscribers(
 pub async fn get_forward_subscribers(
     bot: Bot,
     msg: Message,
-    config: Arc<RwLock<Config>>,
+    config: Arc<RwLock<State>>,
 ) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("failed to get chat_id");
@@ -160,7 +163,7 @@ pub async fn help_admin(bot: Bot, msg: Message) -> EndpointResult<()> {
     Ok(())
 }
 
-pub async fn add_admin(command: Command, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
+pub async fn add_admin(command: Command, config: Arc<RwLock<State>>) -> EndpointResult<()> {
     match command {
         Command::AddAdmin(admin) => {
             let mut config = config.write().unwrap();
@@ -223,7 +226,7 @@ pub async fn get_meme_counter(
     Ok(())
 }
 
-pub async fn get_admins(bot: Bot, msg: Message, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
+pub async fn get_admins(bot: Bot, msg: Message, config: Arc<RwLock<State>>) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("failed to get chat_id");
 
@@ -243,7 +246,7 @@ pub async fn get_admins(bot: Bot, msg: Message, config: Arc<RwLock<Config>>) -> 
     Ok(())
 }
 
-pub async fn remove_admin(command: Command, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
+pub async fn remove_admin(command: Command, config: Arc<RwLock<State>>) -> EndpointResult<()> {
     match command {
         Command::RemoveAdmin(admin) => {
             let mut config = config.write().unwrap();
@@ -267,7 +270,7 @@ pub async fn remove_admin(command: Command, config: Arc<RwLock<Config>>) -> Endp
     Ok(())
 }
 
-pub async fn set_meme_limit(command: Command, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
+pub async fn set_meme_limit(command: Command, config: Arc<RwLock<State>>) -> EndpointResult<()> {
     match command {
         Command::SetMemeLimit(new_limit) => {
             config.write().unwrap().meme_limit = new_limit;
@@ -286,7 +289,7 @@ pub async fn set_meme_limit(command: Command, config: Arc<RwLock<Config>>) -> En
 pub async fn get_meme_limit(
     bot: Bot,
     msg: Message,
-    config: Arc<RwLock<Config>>,
+    config: Arc<RwLock<State>>,
 ) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("could not get chat_id");
@@ -309,7 +312,7 @@ pub async fn get_meme_limit(
     Ok(())
 }
 
-pub async fn subscribe_forwards(msg: Message, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
+pub async fn subscribe_forwards(msg: Message, config: Arc<RwLock<State>>) -> EndpointResult<()> {
     let Some(User { id: user_id, .. }) = msg.from else {
         tracing::warn!("could not get user_id");
         return Ok(());
@@ -327,7 +330,7 @@ pub async fn subscribe_forwards(msg: Message, config: Arc<RwLock<Config>>) -> En
     Ok(())
 }
 
-pub async fn get_config(bot: Bot, msg: Message, config: Arc<RwLock<Config>>) -> EndpointResult<()> {
+pub async fn get_config(bot: Bot, msg: Message, config: Arc<RwLock<State>>) -> EndpointResult<()> {
     let Some(chat_id) = msg.chat_id() else {
         tracing::warn!("could not get chat_id");
         return Ok(());
