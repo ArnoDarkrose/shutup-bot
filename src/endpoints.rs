@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::error::Error;
 use std::sync::{Arc, RwLock, atomic::AtomicUsize};
 
@@ -8,7 +9,7 @@ use teloxide::{
     types::{MessageKind, User},
 };
 
-use crate::app::Command;
+use crate::app::{Command, MsgWrapper};
 use crate::opts::{State, save_config};
 
 use super::*;
@@ -20,6 +21,7 @@ pub async fn handle_spam(
     msg: Message,
     count_messages: Arc<AtomicUsize>,
     config: Arc<RwLock<State>>,
+    spam_queue: Arc<RwLock<VecDeque<MsgWrapper>>>,
 ) -> EndpointResult<()> {
     if let Message {
         from: Some(User {
@@ -45,13 +47,20 @@ pub async fn handle_spam(
                         return Ok(());
                     };
 
-                    if count > config.read().unwrap().meme_limit {
+                    let meme_limit = { config.read().unwrap().meme_limit };
+
+                    if count > meme_limit {
                         forward_to_subscribers(bot.clone(), msg.id, chat_id, Arc::clone(&config))
                             .await;
 
                         if let Err(e) = bot.delete_message(chat_id, msg.id).send().await {
                             tracing::warn!(?e, "unable to delete message: ");
                         }
+
+                        spam_queue.write().unwrap().push_back(MsgWrapper {
+                            msg_id: msg.id,
+                            chat_id,
+                        });
 
                         count_messages.store(count - 1, std::sync::atomic::Ordering::Release);
 
@@ -321,7 +330,32 @@ pub async fn subscribe_forwards(msg: Message, config: Arc<RwLock<State>>) -> End
     {
         let mut config = config.write().unwrap();
 
-        config.forward_subscribers.push(user_id);
+        if config
+            .forward_subscribers
+            .iter()
+            .find(|&&v| v == user_id)
+            .is_none()
+        {
+            config.forward_subscribers.insert(user_id);
+        }
+    }
+
+    // We don't really need the result of this, so the handle is dropped
+    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
+
+    Ok(())
+}
+
+pub async fn unsubscribe_forwards(msg: Message, config: Arc<RwLock<State>>) -> EndpointResult<()> {
+    let Some(User { id: user_id, .. }) = msg.from else {
+        tracing::warn!("could not get user_id");
+        return Ok(());
+    };
+
+    {
+        let mut config = config.write().unwrap();
+
+        config.forward_subscribers.remove(&user_id);
     }
 
     // We don't really need the result of this, so the handle is dropped
@@ -343,6 +377,73 @@ pub async fn get_config(bot: Bot, msg: Message, config: Arc<RwLock<State>>) -> E
     {
         tracing::warn!(?e, "failed to send message: ");
     }
+
+    Ok(())
+}
+
+pub async fn queue_size(
+    bot: Bot,
+    msg: Message,
+    spam_queue: Arc<RwLock<VecDeque<MsgWrapper>>>,
+) -> EndpointResult<()> {
+    let Some(chat_id) = msg.chat_id() else {
+        tracing::warn!("could not get chat_id");
+        return Ok(());
+    };
+
+    if let Err(e) = bot
+        .send_message(
+            chat_id,
+            format!("Spam queue size: {}", spam_queue.read().unwrap().len()),
+        )
+        .send()
+        .await
+    {
+        tracing::warn!(?e, "failed to send message: ");
+    }
+
+    Ok(())
+}
+
+pub async fn subscribe_queue(msg: Message, config: Arc<RwLock<State>>) -> EndpointResult<()> {
+    let Some(chat_id) = msg.chat_id() else {
+        tracing::warn!("could not get chat_id");
+        return Ok(());
+    };
+
+    {
+        let mut config = config.write().unwrap();
+
+        if config
+            .queue_subscribers
+            .iter()
+            .find(|&&v| v == chat_id)
+            .is_none()
+        {
+            config.queue_subscribers.insert(chat_id);
+        }
+    }
+
+    // We don't really need the result of this, so the handle is dropped
+    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
+
+    Ok(())
+}
+
+pub async fn unsubscribe_queue(msg: Message, config: Arc<RwLock<State>>) -> EndpointResult<()> {
+    let Some(chat_id) = msg.chat_id() else {
+        tracing::warn!("could not get chat_id");
+        return Ok(());
+    };
+
+    {
+        let mut config = config.write().unwrap();
+
+        config.queue_subscribers.remove(&chat_id);
+    }
+
+    // We don't really need the result of this, so the handle is dropped
+    std::mem::drop(tokio::spawn(save_config(Arc::clone(&config))));
 
     Ok(())
 }

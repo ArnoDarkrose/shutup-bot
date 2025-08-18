@@ -33,9 +33,13 @@ pub enum Command {
     MemeLimit,
     MemeCounter,
     SubscribeForwards,
+    UnsubscribeForwards,
     ForwardSubscribers,
     Admins,
     Config,
+    QueueSize,
+    SubscribeQueue,
+    UnsubscribeQueue,
 }
 
 /// Stores message id and id of the chat it was sent to
@@ -93,7 +97,7 @@ impl App {
             ..Default::default()
         })));
 
-        let spam_queue = Arc::new(Mutex::new(VecDeque::<MsgWrapper>::new()));
+        let spam_queue = Arc::new(RwLock::new(VecDeque::<MsgWrapper>::new()));
 
         Dispatcher::builder(bot, schema())
             .dependencies(dptree::deps![

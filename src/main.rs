@@ -1,3 +1,4 @@
+// TODO: spawn a task that will wake every 00:00 and referesh counters and send queued messages
 use std::sync::OnceLock;
 
 use clap::Parser;

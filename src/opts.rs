@@ -6,7 +6,7 @@ use std::{
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use teloxide::types::UserId;
+use teloxide::types::{ChatId, UserId};
 use tokio::io::AsyncWriteExt;
 use tracing_journald::Layer;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -69,7 +69,8 @@ impl Cli {
 pub struct State {
     pub admins: HashSet<String>,
     pub meme_limit: usize,
-    pub forward_subscribers: Vec<UserId>,
+    pub forward_subscribers: HashSet<UserId>,
+    pub queue_subscribers: HashSet<ChatId>,
 }
 
 impl Default for State {
@@ -88,7 +89,8 @@ impl Default for State {
                 res
             },
             meme_limit: 3,
-            forward_subscribers: Vec::new(),
+            forward_subscribers: HashSet::new(),
+            queue_subscribers: HashSet::new(),
         }
     }
 }
