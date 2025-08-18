@@ -1,10 +1,11 @@
-use core::start;
 use std::sync::OnceLock;
 
 use clap::Parser;
 use opts::Cli;
 
-mod core;
+use crate::app::App;
+
+mod app;
 mod endpoints;
 mod helpers;
 mod opts;
@@ -22,5 +23,12 @@ async fn main() {
     SHUTUP_TARGET.set(args.shutup_target).unwrap();
     INITIAL_ADMIN.set(args.initial_admin.clone()).unwrap();
 
-    start(args.meme_limit).await;
+    App::new(
+        args.meme_limit,
+        args.connect_timeout,
+        args.timeout,
+        args.concurrent_connections,
+    )
+    .start()
+    .await;
 }

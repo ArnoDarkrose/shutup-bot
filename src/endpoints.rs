@@ -8,7 +8,7 @@ use teloxide::{
     types::{MessageKind, User},
 };
 
-use crate::core::Command;
+use crate::app::Command;
 use crate::opts::{State, save_config};
 
 use super::*;

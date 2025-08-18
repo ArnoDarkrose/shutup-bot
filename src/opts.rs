@@ -16,21 +16,32 @@ use crate::INITIAL_ADMIN;
 #[derive(Parser, Debug)]
 /// Bot that allows to shutup a meme spammer. Logs are written using journald
 pub struct Cli {
-    #[arg(long)]
+    #[arg(long, env)]
     /// Telegram username of the target person
     pub shutup_target: String,
 
-    #[arg(long)]
+    #[arg(long, env)]
     /// Username of the initial admin of the bot. Other admins can be added by interacting with the server when it's up
     pub initial_admin: String,
 
-    #[arg(long, default_value = "2")]
+    #[arg(long, default_value = "2", env)]
     /// Number of memes per day that the person can send without limitations
     pub meme_limit: usize,
 
-    #[arg(long, short, default_value = "info")]
+    #[arg(long, short, default_value = "info", env)]
     /// Level of logs to write, supported values are error, warn, info, debug and tracing
     pub log_level: String,
+
+    #[arg(long, env, default_value = "5")]
+    /// Time (in seconds) of request connection timeout
+    pub connect_timeout: u64,
+
+    #[arg(long, env, default_value = "17")]
+    /// Time (in seconds) of full request timeout
+    pub timeout: u64,
+
+    #[arg(long, env, default_value = "100")]
+    pub concurrent_connections: usize,
 }
 
 impl Cli {

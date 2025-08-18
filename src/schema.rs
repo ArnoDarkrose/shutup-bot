@@ -7,7 +7,7 @@ use teloxide::prelude::*;
 use teloxide::dispatching::UpdateHandler;
 use teloxide::types::User;
 
-use crate::core::Command;
+use crate::app::Command;
 use crate::helpers::refresh_meme_counter;
 use crate::opts::State;
 use crate::{endpoints::*, SHUTUP_TARGET};
