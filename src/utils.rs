@@ -102,6 +102,7 @@ pub async fn save_spam_queue(queue: Arc<RwLock<SpamQueue>>) -> anyhow::Result<()
     let mut fd = BufWriter::new(fd);
 
     fd.write_all(contents.as_bytes()).await?;
+    fd.flush().await?;
 
     Ok(())
 }
@@ -143,6 +144,7 @@ pub async fn save_config(config: Arc<RwLock<Config>>) -> tokio::io::Result<()> {
     let mut fd = BufWriter::new(fd);
 
     fd.write_all(contents.as_bytes()).await?;
+    fd.flush().await?;
 
     Ok(())
 }

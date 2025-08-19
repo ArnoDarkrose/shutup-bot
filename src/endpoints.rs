@@ -30,8 +30,6 @@ pub fn contains_tg_ref<T: AsRef<str>>(text: Option<T>) -> bool {
         };
 
         if domain == "t.me" {
-            //TODO: remove
-            dbg!("found tg reference");
             return true;
         }
     }
