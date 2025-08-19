@@ -8,6 +8,7 @@ use teloxide::{
     prelude::*,
     types::{MessageKind, User},
 };
+use url::Url;
 
 use crate::app::{Command, MsgWrapper, SpamQueue};
 use crate::opts::Config;
@@ -16,12 +17,32 @@ use super::*;
 
 type EndpointResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
+pub fn contains_tg_ref(text: impl AsRef<str>) -> bool {
+    for word in text.as_ref().split(' ') {
+        let Ok(url) = Url::parse(word) else {
+            continue;
+        };
+        let Some(domain) = url.domain() else {
+            continue;
+        };
+
+        if domain == "t.me" {
+            //TODO: remove
+            dbg!("found tg reference");
+            return true;
+        }
+    }
+
+    false
+}
+
 pub async fn handle_spam(
     bot: Bot,
     msg: Message,
     count_messages: Arc<AtomicUsize>,
     config: Arc<RwLock<Config>>,
     spam_queue: Arc<RwLock<SpamQueue>>,
+    message_text: String,
 ) -> EndpointResult<()> {
     if let Message {
         from: Some(User {
@@ -35,7 +56,7 @@ pub async fn handle_spam(
                 .get()
                 .expect("this cell is only written to once at the beginning of main")
         && let MessageKind::Common(ref common_msg) = msg.kind
-        && common_msg.forward_origin.is_some()
+        && (common_msg.forward_origin.is_some() || contains_tg_ref(&message_text))
     {
         let count = count_messages.fetch_add(1, Ordering::AcqRel) + 1;
 

@@ -19,3 +19,4 @@ tower = { version = "0.5.2", features = ["limit"] }
 tracing = "0.1.41"
 tracing-journald = "0.3.1"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+url = "2.5.4"

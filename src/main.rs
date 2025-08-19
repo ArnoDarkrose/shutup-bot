@@ -1,5 +1,3 @@
-// TODO: add a filter for references so that bot also deletes references to tg messages, not only forwards
-
 use std::sync::OnceLock;
 
 use clap::Parser;
