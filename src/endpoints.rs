@@ -17,7 +17,10 @@ use super::*;
 
 type EndpointResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
-pub fn contains_tg_ref(text: impl AsRef<str>) -> bool {
+pub fn contains_tg_ref<T: AsRef<str>>(text: Option<T>) -> bool {
+    let Some(text) = text else {
+        return false;
+    };
     for word in text.as_ref().split(' ') {
         let Ok(url) = Url::parse(word) else {
             continue;
@@ -42,7 +45,6 @@ pub async fn handle_spam(
     count_messages: Arc<AtomicUsize>,
     config: Arc<RwLock<Config>>,
     spam_queue: Arc<RwLock<SpamQueue>>,
-    message_text: String,
 ) -> EndpointResult<()> {
     if let Message {
         from: Some(User {
@@ -56,7 +58,7 @@ pub async fn handle_spam(
                 .get()
                 .expect("this cell is only written to once at the beginning of main")
         && let MessageKind::Common(ref common_msg) = msg.kind
-        && (common_msg.forward_origin.is_some() || contains_tg_ref(&message_text))
+        && (common_msg.forward_origin.is_some() || contains_tg_ref(msg.text()))
     {
         let count = count_messages.fetch_add(1, Ordering::AcqRel) + 1;
 

@@ -147,9 +147,10 @@ impl App {
 
             select! {
                 res = signal_handler() => {
-                    warn!(?res, "received sigterm of sigint, exiting...");
+                    warn!(?res, "received sigterm or sigint, exiting...");
 
                     save_state(spam_queue.clone(), config.clone()).await;
+                    break;
                 }
                 _ = dispatcher.dispatch() => {
                     warn!("dispatcher ended unexpectedly");
