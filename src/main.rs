@@ -4,9 +4,11 @@ use std::sync::OnceLock;
 use clap::Parser;
 use opts::Cli;
 
+mod consts;
 mod core;
 mod endpoints;
 mod helpers;
+mod manga;
 mod opts;
 mod schema;
 

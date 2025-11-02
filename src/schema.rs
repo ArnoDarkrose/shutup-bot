@@ -50,7 +50,8 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'stat
             .branch(case![Command::Help].endpoint(help_admin))
             .branch(case![Command::SetMemeCounter(counter)].endpoint(set_meme_counter))
             .branch(case![Command::SetMemeLimit(new_limit)].endpoint(set_meme_limit))
-        );
+        )
+        .branch(case![Command::Cbz(url)].endpoint(pdf_to_cbz));
 
     Update::filter_message()
         .inspect_async(|count_messages: Arc<AtomicUsize>, last_count_refresh : Arc<Mutex<DateTime<Tz>>>| async move {

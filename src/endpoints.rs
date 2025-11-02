@@ -1,14 +1,22 @@
 use std::error::Error;
 use std::sync::{Arc, RwLock, atomic::AtomicUsize};
 
-use teloxide::types::MessageId;
+use anyhow::anyhow;
+use teloxide::types::{
+    Document, FileMeta, InputFile, MediaDocument, MediaKind, MessageCommon, MessageId,
+};
 use teloxide::{
     dispatching::dialogue::GetChatId,
     prelude::*,
     types::{MessageKind, User},
 };
+use tokio::task;
+use tracing::{info, warn};
+use zip::CompressionMethod;
 
+use crate::consts::{BASE_URL, TOKEN};
 use crate::core::Command;
+use crate::manga::{extract_images, write_images_to_archive};
 use crate::opts::{State, save_config};
 
 use super::*;
@@ -343,6 +351,134 @@ pub async fn get_config(bot: Bot, msg: Message, config: Arc<RwLock<State>>) -> E
     {
         tracing::warn!(?e, "failed to send message: ");
     }
+
+    Ok(())
+}
+
+// TODO: refactor this
+pub async fn pdf_to_cbz(bot: Bot, command: Command, msg: Message) -> EndpointResult<()> {
+    info!("Pdf to cbz request");
+
+    let chat_id = msg
+        .chat
+        .chat_id()
+        .ok_or(anyhow!("Failed to get chat_id"))
+        .inspect_err(|err| warn!(?err))?;
+
+    let url = match command {
+        Command::Cbz(url) => url,
+        _ => {
+            unreachable!()
+        }
+    };
+
+    let (url, file_name) = if let Some((url, filename)) = url.split_once(' ') {
+        (url.to_string(), Some(filename.to_owned()))
+    } else {
+        (url, None)
+    };
+
+    let (doc, file_name) = if let MessageKind::Common(MessageCommon {
+        media_kind:
+            MediaKind::Document(MediaDocument {
+                document:
+                    Document {
+                        file: FileMeta { id, .. },
+                        file_name,
+                        ..
+                    },
+                ..
+            }),
+        ..
+    }) = msg.kind
+    {
+        info!("Getting file...");
+
+        let doc = if url.is_empty() {
+            let file_path = match bot.get_file(id).await {
+                Ok(file) => file.path,
+                Err(err) => {
+                    warn!(?err);
+
+                    bot.send_message(chat_id, format!("Failed to download file: {err:?}"))
+                        .await?;
+
+                    return Err(err).map_err(|err| err.into());
+                }
+            };
+
+            let url = format!("{BASE_URL}/file/bot{}/{file_path}", TOKEN.as_str());
+
+            info!("Downloading file...");
+            bot.send_message(chat_id, "Downloading file...").await?;
+            reqwest::get(&url)
+                .await
+                .inspect_err(|err| warn!(?err))?
+                .bytes()
+                .await
+                .inspect_err(|err| warn!(?err))?
+        } else {
+            info!("Downloading file...");
+            bot.send_message(chat_id, "Downloading file...").await?;
+            reqwest::get(url)
+                .await
+                .inspect_err(|err| warn!(?err))?
+                .bytes()
+                .await
+                .inspect_err(|err| warn!(?err))?
+        };
+        bot.send_message(chat_id, "Download successful!").await?;
+        info!("Downloading successful");
+
+        (doc, file_name)
+    } else {
+        if url.is_empty() {
+            bot.send_message(chat_id, "No file attached").await?;
+            return Err(anyhow!("No file attached")).map_err(|err| err.into());
+        } else {
+            info!("Downloading file...");
+            bot.send_message(chat_id, "Downloading file...").await?;
+            let doc = reqwest::get(url)
+                .await
+                .inspect_err(|err| warn!(?err))?
+                .bytes()
+                .await
+                .inspect_err(|err| warn!(?err))?;
+            info!("Downloading successful");
+            bot.send_message(chat_id, "Download successful!").await?;
+            (doc, file_name)
+        }
+    };
+
+    let archive = task::block_in_place(move || {
+        let doc = lopdf::Document::load_mem(&doc)?;
+        let images = extract_images(&doc)?;
+
+        let compression_method = if images[0].1 == "png" {
+            CompressionMethod::Deflated
+        } else {
+            CompressionMethod::Stored
+        };
+        let archive = write_images_to_archive(images, compression_method);
+
+        crate::manga::error::Result::Ok(archive)
+    })?
+    .inspect_err(|err| warn!(?err))?;
+
+    let file_name = file_name.map(|v| {
+        if v.ends_with(".pdf") {
+            let name = v.rsplit_once(".").unwrap().0;
+            format!("{name}.cbz")
+        } else {
+            format!("{v}.cbz")
+        }
+    });
+    let file = InputFile::memory(archive)
+        .file_name(file_name.unwrap_or_else(|| "somethingsomething.bin".to_string()));
+
+    bot.send_document(chat_id, file)
+        .await
+        .inspect_err(|err| warn!(?err))?;
 
     Ok(())
 }

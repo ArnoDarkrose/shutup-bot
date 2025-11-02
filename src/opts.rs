@@ -8,8 +8,8 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use teloxide::types::UserId;
 use tokio::io::AsyncWriteExt;
-use tracing_journald::Layer;
-use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing::Level;
+use tracing_subscriber::EnvFilter;
 
 use crate::INITIAL_ADMIN;
 
@@ -30,13 +30,11 @@ pub struct Cli {
 
     #[arg(long, short, default_value = "info")]
     /// Level of logs to write, supported values are error, warn, info, debug and tracing
-    pub log_level: String,
+    pub log_level: Level,
 }
 
 impl Cli {
     pub fn setup_logs(&self) {
-        let journald_layer = Layer::new().expect("failed to create journald tracing layer");
-
         match self.log_level.as_str() {
             "error" | "warn" | "info" | "debug" | "trace" | "ERROR" | "WARN" | "INFO" | "DEBUG"
             | "TRACE" => {}
@@ -45,11 +43,13 @@ impl Cli {
             }
         }
 
-        let filter = EnvFilter::new(&self.log_level);
+        let filter = EnvFilter::default().add_directive(self.log_level.into());
 
-        tracing_subscriber::registry()
-            .with(journald_layer)
-            .with(filter)
+        tracing_subscriber::fmt()
+            .with_max_level(self.log_level)
+            .with_writer(std::io::stdout)
+            .with_env_filter(filter)
+            .with_line_number(true)
             .init();
     }
 }

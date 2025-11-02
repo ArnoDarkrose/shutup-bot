@@ -10,10 +10,15 @@ chrono-tz = "0.10.3"
 clap = { version = "4.5.37", features = ["derive"] }
 dptree = "0.3.0"
 expanduser = "1.2.2"
+flate2 = "1.1.5"
+image = "0.25.8"
+lopdf = "0.38.0"
+reqwest = "0.12.24"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 teloxide = { version = "0.15.0", features = ["macros", "tracing"] }
+thiserror = "2.0.17"
 tokio = { version = "1.44.2", features = ["full"] }
 tracing = "0.1.41"
-tracing-journald = "0.3.1"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+zip = "6.0.0"

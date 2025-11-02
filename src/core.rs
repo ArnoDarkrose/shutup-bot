@@ -24,6 +24,7 @@ pub enum Command {
     ForwardSubscribers,
     Admins,
     Config,
+    Cbz(String),
 }
 
 pub async fn start(meme_limit: usize) {
